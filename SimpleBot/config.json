@@ -1,0 +1,19 @@
+{
+  "credentials": {
+    "user": "",
+    "password": ""
+  },
+  "limitsPerHour": {
+    "follow": 15,
+    "unfollow": 15,
+    "like": 30,
+    "unlike": 0
+  },
+  "hashtags": ["insta","happy", "fun", "instagram", "likeforlike"],
+  "process": "Like-and-follow",
+  "duration": {
+    "type": "by_time",
+    "value": 1
+  },
+  "whiteList": []
+}
