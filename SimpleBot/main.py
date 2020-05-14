@@ -1,5 +1,4 @@
-from instagram_private_api import Client, errors
-from instagram_private_api.compat import compat_http_client
+from instabot import API
 import json
 import pickle
 import os
@@ -9,10 +8,15 @@ import traceback
 from datetime import datetime, timedelta
 from copy import deepcopy
 
+
 random.seed(datetime.now())
 
 BOT_FOLDER = os.path.dirname(__file__)
 BOT_CONFIGS = os.path.join(BOT_FOLDER, 'config.json')
+
+
+def sleeper():
+    time.sleep(random.randint(15, 30))
 
 
 def get_configs(path):
@@ -41,50 +45,6 @@ def if_exists(folder):
         return os.path.join(BOT_FOLDER, folder)
 
 
-class ClientPickle(Client):
-    """Class for storing user's cookies from API"""
-
-    def __init__(self, *args, **kwargs):
-        """
-        Initialization of Client class with pickle functionality
-
-        :param args:
-        :param kwargs:
-        """
-        _cookies_path = if_exists("cookies")
-        pcl_files = os.listdir(_cookies_path)
-        if args:
-            user = args[0]
-        else:
-            user = kwargs['user']
-
-        checker = [1 for i in pcl_files if i.split('.')[0] == user]
-
-        if checker:
-            _cookies_path = os.path.join(_cookies_path, f'{user}.pickle')
-            with open(_cookies_path, 'rb') as f:
-                _cookies = pickle.load(f)
-
-            new_kwargs = {**kwargs, **_cookies}
-            super(ClientPickle, self).__init__(*args, **new_kwargs)
-            self.login()
-        else:
-            super(ClientPickle, self).__init__(*args, **kwargs)
-
-    def before_exit(self):
-        """
-        Save cookies to pickle before exit
-
-        :return:
-        """
-        user = self.username
-        _cookies_path = if_exists("cookies")
-        _cookies_path = os.path.join(_cookies_path, f'{user}.pickle')
-
-        with open(_cookies_path, 'wb') as f:
-            pickle.dump(self.settings, f)
-
-
 class SIBot:
     """Main class for all actions and processes"""
 
@@ -110,7 +70,8 @@ class SIBot:
         else:
             raise Exception('Please, provide your credentials(username and password) in config.json')
 
-        self.api = ClientPickle(self.user, __password)
+        self.api = API()
+        self.api.login(username=self.user, password=__password)
 
         """other settings"""
         self.limits_per_hour = self.__configs.pop('limitsPerHour', {})
@@ -151,7 +112,6 @@ class SIBot:
         with open(_monitored_current_data, 'wb') as f:
             pickle.dump(data, f)
 
-        self.api.before_exit()
 
     def liking(self, media_id):
         """
@@ -161,7 +121,8 @@ class SIBot:
         :return:
         """
         try:
-            _ = self.api.post_like(media_id)
+            if self.api.like(media_id):
+                _ = self.api.last_json
         except Exception as e:
             print(e)
 
@@ -173,8 +134,9 @@ class SIBot:
         :return:
         """
         try:
-            creat = self.api.friendships_create(user_id)
-            return creat.get('friendship_status', '').get('following')
+            if self.api.follow(user_id):
+                creat = self.api.last_json
+                return creat.get('friendship_status', '').get('following')
         except Exception as e:
             print(e)
             return False
@@ -198,8 +160,9 @@ class SIBot:
         :return:
         """
         try:
-            destroy = self.api.friendships_destroy(user_id)
-            return not destroy.get('friendship_status', '').get('following')
+            if self.api.unfollow(user_id):
+                destroy = self.api.last_json
+                return not destroy.get('friendship_status', '').get('following')
         except errors.ClientError as e:
             return False
 
@@ -221,9 +184,10 @@ class SIBot:
 
         :return:
         """
-        time.sleep(random.randint(10, 20))
-        followers = self.api.user_followers(self.api.authenticated_user_id, rank_token=Client.generate_uuid())
-        return followers
+        sleeper()
+        if self.api.get_total_followers(self.api.user_id):
+            followers = self.api.last_json
+            return followers
 
     def get_followings(self):
         """
@@ -231,30 +195,33 @@ class SIBot:
 
         :return:
         """
-        time.sleep(random.randint(10, 20))
-        followings = self.api.user_following(self.api.authenticated_user_id, rank_token=Client.generate_uuid())
-        return followings
+        sleeper()
+        if self.api.get_self_users_following():
+            followings = self.api.last_json
+            return followings
 
     def get_new_followers(self):
         """
         Get new followers from news_inbox
         :return:
         """
-        time.sleep(random.randint(10, 20))
-        news = self.api.news_inbox()
-        if news.get('counts', {}).get('relationships') > 0:
-            stories = news.get('new_stories', []) + news.get('old_stories', [])
-            stories = list(filter(lambda x: x['story_type']==101 and x['args']['timestamp'] > self.last_ts, stories))
-            new_followers = []
-            for s in stories:
-                args = s.get('args', {})
-                if args.get('profile_id') and args.get('profile_id') not in new_followers:
-                    new_followers.append(args.get('profile_id'))
-                if args.get('second_profile_id') and args.get('second_profile_id') not in new_followers:
-                    new_followers.append(args.get('second_profile_id'))
-            return new_followers
-        else:
-            return []
+        sleeper()
+
+        if self.api.get_news_inbox():
+            news = self.api.last_json
+            if news.get('counts', {}).get('relationships') > 0:
+                stories = news.get('new_stories', []) + news.get('old_stories', [])
+                stories = list(filter(lambda x: x['story_type']==101 and x['args']['timestamp'] > self.last_ts, stories))
+                new_followers = []
+                for s in stories:
+                    args = s.get('args', {})
+                    if args.get('profile_id') and args.get('profile_id') not in new_followers:
+                        new_followers.append(args.get('profile_id'))
+                    if args.get('second_profile_id') and args.get('second_profile_id') not in new_followers:
+                        new_followers.append(args.get('second_profile_id'))
+                return new_followers
+            else:
+                return []
 
     def check_if_suit(self, media):
         """
@@ -276,18 +243,14 @@ class SIBot:
             if user_id in m_users:
                 return False
 
-            time.sleep(random.randint(5, 15))
-            user_info = self.api.user_info(user_id)
-            if user_info.get('user', {}).get('is_business', None) \
-                    or user_info.get('user', {}).get('is_potential_business', None):
-                return False
+            sleeper()
+            if self.api.get_username_info(user_id):
+                user_info = self.api.last_json
 
-            time.sleep(random.randint(10, 15))
-            friendship = self.api.friendships_show(user_id)
-            if friendship.get('blocking', None):
-                return False
-            if friendship.get('followed_by', None):
-                return False
+                if user_info.get('user', {}).get('is_business', None) \
+                        or user_info.get('user', {}).get('is_potential_business', None):
+                    return False
+
         return True
 
     def get_user_media(self, user_id):
@@ -296,8 +259,13 @@ class SIBot:
         :param user_id:
         :return:
         """
-        feed = self.api.user_feed(user_id)
-        return feed
+        try:
+            if self.api.get_user_feed(user_id):
+                feed = self.api.last_json
+                return feed
+        except Exception as e:
+            print(e)
+            return {}
 
     def hashtag_feed_list(self, hashtags):
         """
@@ -306,16 +274,13 @@ class SIBot:
         :return:
         """
         next_max_ids = [1 for _ in range(len(hashtags))]
-        gen_tokens = [Client.generate_uuid() for _ in range(len(hashtags))]
 
         while [1 for i in next_max_ids if i]:
             items = []
             for hashtag in hashtags:
                 next_max_id = next_max_ids[hashtags.index(hashtag)]
                 if next_max_id:
-                    gen_token = gen_tokens[hashtags.index(hashtag)]
-
-                    hashtag_items, next_max_id = self.hashtag_feed(hashtag, gen_token, next_max_id)
+                    hashtag_items, next_max_id = self.hashtag_feed(hashtag, next_max_id)
 
                     items.extend(hashtag_items)
                     next_max_ids[hashtags.index(hashtag)] = next_max_id
@@ -323,35 +288,42 @@ class SIBot:
                     continue
             yield items
 
-    def hashtag_feed(self, hashtag, gen_token, next_max_id):
+    def hashtag_feed(self, hashtag, next_max_id):
         """
         Get hashtag feed
         :param hashtag:
-        :param gen_token:
         :param next_max_id:
         :return:
         """
-        time.sleep(random.randint(5, 15))
+        sleeper()
         tries = 0
 
         if next_max_id == 1:
 
             while tries < 5:
                 try:
-                    results = self.api.feed_tag(hashtag, gen_token)
+                    if self.api.get_hashtag_feed(hashtag):
+                        results = self.api.last_json
 
-                    return results.get('ranked_items', []) + results.get('items', []), results['next_max_id']
-                except compat_http_client.IncompleteRead:
+                        return results.get('ranked_items', []) + results.get('items', []), results['next_max_id']
+
+                except:
                     tries += 1
+                    sleeper()
+                    traceback.print_exc()
                     continue
             else:
                 return [], next_max_id
         else:
             while tries < 5:
                 try:
-                    results = self.api.feed_tag(hashtag, gen_token, max_id=next_max_id)
-                    return results.get('items', []), results['next_max_id']
-                except compat_http_client.IncompleteRead:
+                    if self.api.get_hashtag_feed(hashtag, max_id=next_max_id):
+                        results = self.api.last_json
+                        return results.get('items', []), results['next_max_id']
+
+                except:
+                    sleeper()
+                    traceback.print_exc()
                     tries += 1
                     continue
             else:
@@ -395,8 +367,8 @@ class SIBot:
                 self.process_like()
             elif self.process == "Like-and-follow":
                 self.process_like_and_follow()
-        except Exception:
-            print(traceback.format_exc())
+        except Exception as e:
+            print(e)
         finally:
             self.dump_all()
         print('A simple bot finished the process.')
@@ -409,7 +381,7 @@ class SIBot:
         medias = self.prepare_process_like()
         wait_time = 3600//(self.limits_per_hour.get('like') + 1)
         for m in medias:
-            time.sleep(wait_time + trunc_gauss(0, 5, -30, 30))
+            time.sleep(wait_time + trunc_gauss(0, 10, -40, 40))
             self.liking(m)
 
     def prepare_process_like(self):
@@ -547,7 +519,7 @@ class SIBot:
         :return:
         """
         try:
-            time.sleep(random.randint(10, 15))
+            sleeper()
             feed = self.get_user_media(user_id)
             items = [i for i in feed.get('items', []) if not i.get('has_liked', False)]
             items = sorted(items[:6], key=lambda x: x['like_count'], reverse=True)
@@ -555,7 +527,8 @@ class SIBot:
                 return items[0].get('id')
             else:
                 return None
-        except Exception:
+        except Exception as e:
+            print(e)
             return None
 
     def process_like_and_follow(self):
@@ -569,7 +542,7 @@ class SIBot:
                          self.limits_per_hour.get('unfollow'))
         wait_time = 3600 // all_acts + 1
         while follow_acts or media_acts or unfollow_acts:
-            time.sleep(wait_time + trunc_gauss(0, 5, -30, 30))
+            time.sleep(wait_time + trunc_gauss(0, 10, -40, 40))
             rc = random.choices(['f', 'l', 'u'], [follow_acts, media_acts, unfollow_acts])[0]
 
             if rc == 'f':
